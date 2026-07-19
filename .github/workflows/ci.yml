@@ -1,0 +1,39 @@
+name: Server CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            dotnet-tools.json
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Restore packages
+        run: dotnet restore ColdVerdge.Server.slnx
+
+      - name: Build
+        run: dotnet build ColdVerdge.Server.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test ColdVerdge.Server.slnx --configuration Release --no-build --verbosity normal

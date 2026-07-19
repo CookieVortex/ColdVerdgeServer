@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ColdVerdge.Api/ColdVerdge.Api.csproj" />
+    <Project Path="src/ColdVerdge.Application/ColdVerdge.Application.csproj" />
+    <Project Path="src/ColdVerdge.Domain/ColdVerdge.Domain.csproj" />
+    <Project Path="src/ColdVerdge.Infrastructure/ColdVerdge.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ColdVerdge.Tests/ColdVerdge.Tests.csproj" />
+  </Folder>
+</Solution>
