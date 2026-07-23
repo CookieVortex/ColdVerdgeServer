@@ -10,6 +10,10 @@ public sealed class MarketOffer
 
     public string ItemId { get; set; } = string.Empty;
 
+    public Guid? ItemInstanceId { get; set; }
+
+    public int ConditionPercent { get; set; } = 100;
+
     public int PriceCopper { get; set; }
 
     public string Status { get; set; } = "active";
@@ -21,4 +25,6 @@ public sealed class MarketOffer
     public DateTimeOffset? SoldAtUtc { get; set; }
 
     public Player SellerPlayer { get; set; } = null!;
+
+    public PlayerItemInstance? ItemInstance { get; set; }
 }

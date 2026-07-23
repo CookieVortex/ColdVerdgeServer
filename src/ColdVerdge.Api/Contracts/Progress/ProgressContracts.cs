@@ -4,6 +4,12 @@ public sealed class PlayerProgressResponse
 {
     public string ProfessionId { get; init; } = string.Empty;
 
+    public long ProfessionPlaySeconds { get; init; }
+
+    public int ProfessionProgressPercent { get; init; }
+
+    public int CombatRating { get; init; }
+
     public int Level { get; init; }
 
     public int CurrentExperience { get; init; }
@@ -21,8 +27,6 @@ public sealed class PlayerProgressResponse
     public int Perception { get; init; }
 
     public int Intelligence { get; init; }
-
-    public int Survival { get; init; }
 
     public int PistolsExperience { get; init; }
 
@@ -63,8 +67,6 @@ public sealed class SetAttributesRequest
     public int Perception { get; init; }
 
     public int Intelligence { get; init; }
-
-    public int Survival { get; init; }
 
     public int FreeAttributePoints { get; init; }
 }

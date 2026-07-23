@@ -1,5 +1,6 @@
 using System.Data;
 using ColdVerdge.Api.Contracts.Progress;
+using ColdVerdge.Domain.Characters;
 using ColdVerdge.Domain.Entities;
 using ColdVerdge.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
@@ -146,7 +147,6 @@ public sealed class ProgressController : ControllerBase
             request.Agility,
             request.Perception,
             request.Intelligence,
-            request.Survival,
             request.FreeAttributePoints
         };
 
@@ -169,7 +169,6 @@ public sealed class ProgressController : ControllerBase
                 request.Agility,
                 request.Perception,
                 request.Intelligence,
-                request.Survival,
                 request.FreeAttributePoints
             });
 
@@ -198,7 +197,6 @@ public sealed class ProgressController : ControllerBase
             Math.Max(0, player.Agility) +
             Math.Max(0, player.Perception) +
             Math.Max(0, player.Intelligence) +
-            Math.Max(0, player.Survival) +
             Math.Max(0, player.FreeAttributePoints);
         long requestedPointTotal = values.Sum(value => (long)value);
 
@@ -217,7 +215,6 @@ public sealed class ProgressController : ControllerBase
         player.Agility = request.Agility;
         player.Perception = request.Perception;
         player.Intelligence = request.Intelligence;
-        player.Survival = request.Survival;
         player.FreeAttributePoints = request.FreeAttributePoints;
         player.ProgressUpdatedAtUtc = DateTimeOffset.UtcNow;
 
@@ -403,8 +400,11 @@ public sealed class ProgressController : ControllerBase
             }
         }
 
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         player.ProfessionId = professionId;
-        player.ProgressUpdatedAtUtc = DateTimeOffset.UtcNow;
+        player.ProfessionPlaySeconds = 0;
+        player.ProfessionLastHeartbeatAtUtc = isAbandon ? null : now;
+        player.ProgressUpdatedAtUtc = now;
 
         ProgressMutation mutation = CreateMutation(
             playerId,
@@ -417,6 +417,38 @@ public sealed class ProgressController : ControllerBase
         await transaction.CommitAsync(cancellationToken);
 
         return Ok(MapProfessionOperation(mutation, player, false));
+    }
+
+    [HttpPost("profession-heartbeat")]
+    public async Task<ActionResult<PlayerProgressResponse>> ProfessionHeartbeat(
+        Guid playerId,
+        CancellationToken cancellationToken)
+    {
+        Player? player = await _dbContext.Players.SingleOrDefaultAsync(
+            item => item.Id == playerId,
+            cancellationToken);
+        if (player is null)
+            return NotFound();
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (!string.IsNullOrEmpty(player.ProfessionId))
+        {
+            if (player.ProfessionLastHeartbeatAtUtc is DateTimeOffset previous)
+            {
+                double elapsed = (now - previous).TotalSeconds;
+                if (elapsed is >= 1 and <= 120)
+                {
+                    player.ProfessionPlaySeconds = Math.Min(
+                        CharacterRules.ProfessionMasterySeconds,
+                        player.ProfessionPlaySeconds + (long)Math.Floor(elapsed));
+                }
+            }
+            player.ProfessionLastHeartbeatAtUtc = now;
+            player.ProgressUpdatedAtUtc = now;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return Ok(MapProgress(player));
     }
 
     private async Task<ActionResult<ProfessionOperationResponse>> ReturnExistingProfession(
@@ -538,6 +570,22 @@ public sealed class ProgressController : ControllerBase
         return new PlayerProgressResponse
         {
             ProfessionId = player.ProfessionId ?? string.Empty,
+            ProfessionPlaySeconds = Math.Clamp(player.ProfessionPlaySeconds, 0, CharacterRules.ProfessionMasterySeconds),
+            ProfessionProgressPercent = (int)Math.Floor(
+                Math.Clamp(player.ProfessionPlaySeconds, 0, CharacterRules.ProfessionMasterySeconds) * 100d /
+                CharacterRules.ProfessionMasterySeconds),
+            CombatRating = CharacterRules.CombatRating(
+                player.Level,
+                player.Strength,
+                player.Endurance,
+                player.Agility,
+                player.Perception,
+                player.Intelligence,
+                100 + Math.Max(0, player.Endurance) * 5,
+                Math.Max(0, player.Endurance / 10),
+                1 + (int)Math.Round(Math.Max(0, player.Strength) * .45d),
+                Math.Max(0, player.Perception) * .25d,
+                30d + Math.Max(0, player.Strength) * 1.5d),
             Level = Math.Max(1, player.Level),
             CurrentExperience = Math.Max(0, player.CurrentExperience),
             ExperienceToNextLevel = Math.Max(1, player.ExperienceToNextLevel),
@@ -547,7 +595,6 @@ public sealed class ProgressController : ControllerBase
             Agility = Math.Max(0, player.Agility),
             Perception = Math.Max(0, player.Perception),
             Intelligence = Math.Max(0, player.Intelligence),
-            Survival = Math.Max(0, player.Survival),
             PistolsExperience = ClampSkill(player.PistolsExperience),
             SubmachineGunsExperience = ClampSkill(player.SubmachineGunsExperience),
             AssaultRiflesExperience = ClampSkill(player.AssaultRiflesExperience),

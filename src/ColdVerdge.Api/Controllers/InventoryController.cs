@@ -1,5 +1,6 @@
 using System.Data;
 using ColdVerdge.Api.GameData;
+using ColdVerdge.Domain.Characters;
 using ColdVerdge.Domain.Entities;
 using ColdVerdge.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
@@ -193,6 +194,7 @@ public sealed class InventoryController : ControllerBase
         string requestId = NormalizeRequestId(request.RequestId);
         string itemId = NormalizeItemId(request.ItemId);
         string reason = NormalizeToken(request.Reason);
+        Guid? requestedInstanceId = request.ItemInstanceId;
 
         ActionResult? validationError = ValidateRequestId(requestId);
         if (validationError is not null)
@@ -264,6 +266,55 @@ public sealed class InventoryController : ControllerBase
         }
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
+        PlayerItemInstance? consumedInstance = null;
+        if (GameItemCatalog.TracksCondition(itemId))
+        {
+            if (request.Quantity != 1)
+            {
+                return BadRequest(new ProblemDetails
+                {
+                    Title = "Invalid instance quantity",
+                    Detail = "Weapons and armor must be removed one instance at a time.",
+                    Status = StatusCodes.Status400BadRequest
+                });
+            }
+
+            IQueryable<PlayerItemInstance> availableInstances =
+                _dbContext.PlayerItemInstances
+                    .Where(instance =>
+                        instance.PlayerId == playerId &&
+                        instance.ItemId == itemId)
+                    .Where(instance => !_dbContext.MarketOffers.Any(offer =>
+                        offer.ItemInstanceId == instance.Id &&
+                        offer.Status == "active"));
+
+            consumedInstance = requestedInstanceId.HasValue
+                ? await availableInstances.SingleOrDefaultAsync(
+                    instance => instance.Id == requestedInstanceId.Value,
+                    cancellationToken)
+                : await availableInstances
+                    .OrderBy(instance => instance.ConditionPercent)
+                    .ThenBy(instance => instance.CreatedAtUtc)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+            if (consumedInstance is null)
+            {
+                return Conflict(new ProblemDetails
+                {
+                    Title = "Item instance is unavailable",
+                    Detail = "The selected item instance is listed for sale or no longer owned.",
+                    Status = StatusCodes.Status409Conflict
+                });
+            }
+
+            List<PlayerEquipmentItem> equippedInstanceRows =
+                await _dbContext.PlayerEquipmentItems
+                    .Where(item => item.ItemInstanceId == consumedInstance.Id)
+                    .ToListAsync(cancellationToken);
+            _dbContext.PlayerEquipmentItems.RemoveRange(equippedInstanceRows);
+            _dbContext.PlayerItemInstances.Remove(consumedInstance);
+        }
+
         int quantityAfter = inventoryItem.Quantity - request.Quantity;
 
         if (quantityAfter == 0)
@@ -323,6 +374,7 @@ public sealed class InventoryController : ControllerBase
         string requestId = NormalizeRequestId(request.RequestId);
         string slot = NormalizeToken(request.Slot);
         string itemId = NormalizeItemId(request.ItemId);
+        Guid? requestedInstanceId = request.ItemInstanceId;
         bool unequip = string.IsNullOrEmpty(itemId);
         string operation = unequip ? "unequip" : "equip";
 
@@ -380,10 +432,16 @@ public sealed class InventoryController : ControllerBase
                 IsolationLevel.Serializable,
                 cancellationToken);
 
-        if (!await PlayerExists(playerId, cancellationToken))
+        Player? player = await _dbContext.Players
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == playerId,
+                cancellationToken);
+        if (player is null)
             return PlayerNotFound();
 
         int quantityAfter = 0;
+        PlayerItemInstance? selectedInstance = null;
         if (!unequip)
         {
             PlayerInventoryItem? ownedItem =
@@ -394,6 +452,49 @@ public sealed class InventoryController : ControllerBase
             if (ownedItem is null || ownedItem.Quantity <= 0)
                 return NotEnoughItems(itemId, 1, 0);
 
+            if (GameItemCatalog.TryGetEquipmentRequirement(itemId, out EquipmentRequirement requirement))
+            {
+                IReadOnlyList<string> failures = CharacterRules.GetBlockingEquipmentFailures(player, requirement);
+                if (failures.Count > 0)
+                {
+                    return UnprocessableEntity(new ProblemDetails
+                    {
+                        Title = "Equipment requirements not met",
+                        Detail = string.Join("; ", failures),
+                        Status = StatusCodes.Status422UnprocessableEntity
+                    });
+                }
+            }
+
+            if (GameItemCatalog.TracksCondition(itemId))
+            {
+                IQueryable<PlayerItemInstance> instances = _dbContext.PlayerItemInstances
+                    .Where(instance => instance.PlayerId == playerId && instance.ItemId == itemId)
+                    .Where(instance => !_dbContext.MarketOffers.Any(
+                        offer => offer.ItemInstanceId == instance.Id && offer.Status == "active"))
+                    .Where(instance => !_dbContext.PlayerEquipmentItems.Any(
+                        equipment => equipment.ItemInstanceId == instance.Id && equipment.Slot != slot));
+
+                selectedInstance = requestedInstanceId.HasValue
+                    ? await instances.SingleOrDefaultAsync(
+                        instance => instance.Id == requestedInstanceId.Value,
+                        cancellationToken)
+                    : await instances
+                        .OrderByDescending(instance => instance.ConditionPercent)
+                        .ThenBy(instance => instance.CreatedAtUtc)
+                        .FirstOrDefaultAsync(cancellationToken);
+
+                if (selectedInstance is null)
+                {
+                    return Conflict(new ProblemDetails
+                    {
+                        Title = "Item instance is unavailable",
+                        Detail = "The selected item is equipped elsewhere, listed for sale, or no longer owned.",
+                        Status = StatusCodes.Status409Conflict
+                    });
+                }
+            }
+
             quantityAfter = ownedItem.Quantity;
         }
 
@@ -401,7 +502,8 @@ public sealed class InventoryController : ControllerBase
             await _dbContext.PlayerEquipmentItems
                 .Where(item =>
                     item.PlayerId == playerId &&
-                    (item.Slot == slot || (!unequip && item.ItemId == itemId)))
+                    (item.Slot == slot ||
+                     (!unequip && selectedInstance != null && item.ItemInstanceId == selectedInstance.Id)))
                 .ToListAsync(cancellationToken);
 
         PlayerEquipmentItem? slotRow =
@@ -427,12 +529,14 @@ public sealed class InventoryController : ControllerBase
                 PlayerId = playerId,
                 Slot = slot,
                 ItemId = itemId,
+                ItemInstanceId = selectedInstance?.Id,
                 UpdatedAtUtc = now
             });
         }
         else
         {
             slotRow.ItemId = itemId;
+            slotRow.ItemInstanceId = selectedInstance?.Id;
             slotRow.UpdatedAtUtc = now;
         }
 
@@ -794,6 +898,27 @@ public sealed class InventoryController : ControllerBase
                 .OrderBy(item => item.Slot)
                 .ToListAsync(cancellationToken);
 
+        List<ItemInstanceResponse> instances = await _dbContext.PlayerItemInstances
+            .AsNoTracking()
+            .Where(instance =>
+                instance.PlayerId == playerId &&
+                !_dbContext.MarketOffers.Any(offer =>
+                    offer.ItemInstanceId == instance.Id &&
+                    offer.Status == "active"))
+            .OrderBy(instance => instance.ItemId)
+            .ThenByDescending(instance => instance.ConditionPercent)
+            .Select(instance => new ItemInstanceResponse
+            {
+                InstanceId = instance.Id,
+                ItemId = instance.ItemId,
+                ConditionPercent = instance.ConditionPercent,
+                UpdatedAtUtc = instance.UpdatedAtUtc
+            })
+            .ToListAsync(cancellationToken);
+
+        Dictionary<Guid, ItemInstanceResponse> instancesById = instances
+            .ToDictionary(instance => instance.InstanceId);
+
         List<EquipmentItemResponse> equipment = equipmentRows
             .Where(item =>
                 ownedItemIds.Contains(item.ItemId) &&
@@ -803,6 +928,11 @@ public sealed class InventoryController : ControllerBase
             {
                 Slot = item.Slot,
                 ItemId = item.ItemId,
+                ItemInstanceId = item.ItemInstanceId,
+                ConditionPercent = item.ItemInstanceId.HasValue &&
+                                   instancesById.TryGetValue(item.ItemInstanceId.Value, out ItemInstanceResponse instance)
+                    ? instance.ConditionPercent
+                    : 100,
                 UpdatedAtUtc = item.UpdatedAtUtc
             })
             .ToList();
@@ -811,6 +941,7 @@ public sealed class InventoryController : ControllerBase
         {
             PlayerId = playerId,
             Items = items,
+            Instances = instances,
             Equipment = equipment
         };
     }
@@ -981,6 +1112,7 @@ public sealed class ConsumeInventoryRequest
     public string ItemId { get; init; } = string.Empty;
     public int Quantity { get; init; }
     public string Reason { get; init; } = "consume";
+    public Guid? ItemInstanceId { get; init; }
 }
 
 public sealed class SetEquipmentRequest
@@ -988,6 +1120,7 @@ public sealed class SetEquipmentRequest
     public string RequestId { get; init; } = string.Empty;
     public string Slot { get; init; } = string.Empty;
     public string ItemId { get; init; } = string.Empty;
+    public Guid? ItemInstanceId { get; init; }
 }
 
 public sealed class SellResourceRequest
@@ -1002,6 +1135,8 @@ public sealed class InventoryStateResponse
     public Guid PlayerId { get; init; }
     public IReadOnlyList<InventoryItemResponse> Items { get; init; } =
         Array.Empty<InventoryItemResponse>();
+    public IReadOnlyList<ItemInstanceResponse> Instances { get; init; } =
+        Array.Empty<ItemInstanceResponse>();
     public IReadOnlyList<EquipmentItemResponse> Equipment { get; init; } =
         Array.Empty<EquipmentItemResponse>();
 }
@@ -1017,6 +1152,16 @@ public sealed class EquipmentItemResponse
 {
     public string Slot { get; init; } = string.Empty;
     public string ItemId { get; init; } = string.Empty;
+    public Guid? ItemInstanceId { get; init; }
+    public int ConditionPercent { get; init; } = 100;
+    public DateTimeOffset UpdatedAtUtc { get; init; }
+}
+
+public sealed class ItemInstanceResponse
+{
+    public Guid InstanceId { get; init; }
+    public string ItemId { get; init; } = string.Empty;
+    public int ConditionPercent { get; init; } = 100;
     public DateTimeOffset UpdatedAtUtc { get; init; }
 }
 

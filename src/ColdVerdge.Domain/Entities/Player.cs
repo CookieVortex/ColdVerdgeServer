@@ -29,8 +29,6 @@ public sealed class Player
 
     public int Intelligence { get; set; } = 10;
 
-    public int Survival { get; set; } = 10;
-
     public int PistolsExperience { get; set; }
 
     public int SubmachineGunsExperience { get; set; }
@@ -48,6 +46,10 @@ public sealed class Player
     public int MedicineExperience { get; set; }
 
     public string ProfessionId { get; set; } = string.Empty;
+
+    public long ProfessionPlaySeconds { get; set; }
+
+    public DateTimeOffset? ProfessionLastHeartbeatAtUtc { get; set; }
 
     public DateTimeOffset ProgressUpdatedAtUtc { get; set; } =
         DateTimeOffset.UtcNow;

@@ -14,6 +14,7 @@ public sealed class GameDbContext : DbContext
     public DbSet<PlayerWallet> PlayerWallets => Set<PlayerWallet>();
     public DbSet<WalletTransaction> WalletTransactions => Set<WalletTransaction>();
     public DbSet<PlayerInventoryItem> PlayerInventoryItems => Set<PlayerInventoryItem>();
+    public DbSet<PlayerItemInstance> PlayerItemInstances => Set<PlayerItemInstance>();
     public DbSet<PlayerEquipmentItem> PlayerEquipmentItems => Set<PlayerEquipmentItem>();
     public DbSet<InventoryGrant> InventoryGrants => Set<InventoryGrant>();
     public DbSet<InventoryMutation> InventoryMutations => Set<InventoryMutation>();
@@ -28,6 +29,7 @@ public sealed class GameDbContext : DbContext
         ConfigurePlayerWallet(modelBuilder);
         ConfigureWalletTransaction(modelBuilder);
         ConfigurePlayerInventoryItem(modelBuilder);
+        ConfigurePlayerItemInstance(modelBuilder);
         ConfigurePlayerEquipmentItem(modelBuilder);
         ConfigureInventoryGrant(modelBuilder);
         ConfigureInventoryMutation(modelBuilder);
@@ -74,7 +76,6 @@ public sealed class GameDbContext : DbContext
         entity.Property(player => player.Agility).HasColumnName("agility").HasDefaultValue(10).IsRequired();
         entity.Property(player => player.Perception).HasColumnName("perception").HasDefaultValue(10).IsRequired();
         entity.Property(player => player.Intelligence).HasColumnName("intelligence").HasDefaultValue(10).IsRequired();
-        entity.Property(player => player.Survival).HasColumnName("survival").HasDefaultValue(10).IsRequired();
         entity.Property(player => player.PistolsExperience).HasColumnName("pistols_experience").HasDefaultValue(0).IsRequired();
         entity.Property(player => player.SubmachineGunsExperience).HasColumnName("submachine_guns_experience").HasDefaultValue(0).IsRequired();
         entity.Property(player => player.AssaultRiflesExperience).HasColumnName("assault_rifles_experience").HasDefaultValue(0).IsRequired();
@@ -88,6 +89,12 @@ public sealed class GameDbContext : DbContext
             .HasMaxLength(32)
             .HasDefaultValue(string.Empty)
             .IsRequired();
+        entity.Property(player => player.ProfessionPlaySeconds)
+            .HasColumnName("profession_play_seconds")
+            .HasDefaultValue(0L)
+            .IsRequired();
+        entity.Property(player => player.ProfessionLastHeartbeatAtUtc)
+            .HasColumnName("profession_last_heartbeat_at_utc");
         entity.Property(player => player.ProgressUpdatedAtUtc)
             .HasColumnName("progress_updated_at_utc")
             .HasDefaultValueSql("CURRENT_TIMESTAMP")
@@ -101,9 +108,10 @@ public sealed class GameDbContext : DbContext
                 tableBuilder.HasCheckConstraint("ck_players_current_experience_non_negative", "current_experience >= 0");
                 tableBuilder.HasCheckConstraint("ck_players_experience_to_next_level_positive", "experience_to_next_level >= 1");
                 tableBuilder.HasCheckConstraint("ck_players_free_attribute_points_non_negative", "free_attribute_points >= 0");
-                tableBuilder.HasCheckConstraint("ck_players_attributes_non_negative", "strength >= 0 AND endurance >= 0 AND agility >= 0 AND perception >= 0 AND intelligence >= 0 AND survival >= 0");
+                tableBuilder.HasCheckConstraint("ck_players_attributes_non_negative", "strength >= 0 AND endurance >= 0 AND agility >= 0 AND perception >= 0 AND intelligence >= 0");
                 tableBuilder.HasCheckConstraint("ck_players_skill_experience_range", "pistols_experience BETWEEN 0 AND 15000 AND submachine_guns_experience BETWEEN 0 AND 15000 AND assault_rifles_experience BETWEEN 0 AND 15000 AND shotguns_experience BETWEEN 0 AND 15000 AND sniper_rifles_experience BETWEEN 0 AND 15000 AND machine_guns_experience BETWEEN 0 AND 15000 AND throwables_experience BETWEEN 0 AND 15000 AND medicine_experience BETWEEN 0 AND 15000");
                 tableBuilder.HasCheckConstraint("ck_players_profession_supported", "profession_id IN ('', 'miner', 'mercenary', 'engineer', 'scout', 'mayor')");
+                tableBuilder.HasCheckConstraint("ck_players_profession_play_seconds_range", "profession_play_seconds BETWEEN 0 AND 360000");
             });
 
         entity.HasIndex(player => player.NormalizedUserName).IsUnique();
@@ -219,7 +227,6 @@ public sealed class GameDbContext : DbContext
                 item.ItemId
             })
             .IsUnique();
-
         entity.HasOne(item => item.Player)
             .WithMany()
             .HasForeignKey(item => item.PlayerId)
@@ -246,6 +253,8 @@ public sealed class GameDbContext : DbContext
             .HasColumnName("item_id")
             .HasMaxLength(64)
             .IsRequired();
+        entity.Property(item => item.ItemInstanceId)
+            .HasColumnName("item_instance_id");
         entity.Property(item => item.UpdatedAtUtc)
             .HasColumnName("updated_at_utc")
             .IsRequired();
@@ -256,7 +265,50 @@ public sealed class GameDbContext : DbContext
                 item.ItemId
             })
             .IsUnique();
+        entity.HasIndex(item => item.ItemInstanceId)
+            .IsUnique()
+            .HasFilter("item_instance_id IS NOT NULL");
 
+        entity.HasOne(item => item.Player)
+            .WithMany()
+            .HasForeignKey(item => item.PlayerId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        entity.HasOne(item => item.ItemInstance)
+            .WithMany()
+            .HasForeignKey(item => item.ItemInstanceId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private static void ConfigurePlayerItemInstance(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<PlayerItemInstance>();
+
+        entity.ToTable(
+            "player_item_instances",
+            tableBuilder => tableBuilder.HasCheckConstraint(
+                "ck_player_item_instances_condition_range",
+                "condition_percent BETWEEN 0 AND 100"));
+
+        entity.HasKey(item => item.Id);
+        entity.Property(item => item.Id).HasColumnName("id");
+        entity.Property(item => item.PlayerId).HasColumnName("player_id");
+        entity.Property(item => item.ItemId)
+            .HasColumnName("item_id")
+            .HasMaxLength(64)
+            .IsRequired();
+        entity.Property(item => item.ConditionPercent)
+            .HasColumnName("condition_percent")
+            .HasDefaultValue(100)
+            .IsRequired();
+        entity.Property(item => item.CreatedAtUtc)
+            .HasColumnName("created_at_utc")
+            .IsRequired();
+        entity.Property(item => item.UpdatedAtUtc)
+            .HasColumnName("updated_at_utc")
+            .IsRequired();
+
+        entity.HasIndex(item => new { item.PlayerId, item.ItemId });
         entity.HasOne(item => item.Player)
             .WithMany()
             .HasForeignKey(item => item.PlayerId)
@@ -416,6 +468,9 @@ public sealed class GameDbContext : DbContext
                 tableBuilder.HasCheckConstraint(
                     "ck_market_offers_status_supported",
                     "status IN ('active', 'sold', 'cancelled')");
+                tableBuilder.HasCheckConstraint(
+                    "ck_market_offers_condition_range",
+                    "condition_percent BETWEEN 0 AND 100");
             });
 
         entity.HasKey(offer => offer.Id);
@@ -429,6 +484,11 @@ public sealed class GameDbContext : DbContext
             .HasColumnName("item_id")
             .HasMaxLength(64)
             .IsRequired();
+        entity.Property(offer => offer.ItemInstanceId).HasColumnName("item_instance_id");
+        entity.Property(offer => offer.ConditionPercent)
+            .HasColumnName("condition_percent")
+            .HasDefaultValue(100)
+            .IsRequired();
         entity.Property(offer => offer.PriceCopper).HasColumnName("price_copper").IsRequired();
         entity.Property(offer => offer.Status)
             .HasColumnName("status")
@@ -440,10 +500,18 @@ public sealed class GameDbContext : DbContext
 
         entity.HasIndex(offer => new { offer.SellerPlayerId, offer.CreateRequestId }).IsUnique();
         entity.HasIndex(offer => new { offer.ItemId, offer.Status, offer.PriceCopper, offer.CreatedAtUtc });
+        entity.HasIndex(offer => offer.ItemInstanceId)
+            .IsUnique()
+            .HasFilter("item_instance_id IS NOT NULL AND status = 'active'");
 
         entity.HasOne(offer => offer.SellerPlayer)
             .WithMany()
             .HasForeignKey(offer => offer.SellerPlayerId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        entity.HasOne(offer => offer.ItemInstance)
+            .WithMany()
+            .HasForeignKey(offer => offer.ItemInstanceId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 

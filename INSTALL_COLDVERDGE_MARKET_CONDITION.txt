@@ -1,0 +1,48 @@
+ColdVerdge: Market redesign + server item condition
+====================================================
+
+АРХИВ КЛИЕНТА
+1. Закройте Unity.
+2. Сделайте резервную копию папки:
+   <ваш проект>\Assets\_Project
+3. Распакуйте ColdVerdge_Client_Market_Condition.zip в:
+   <ваш проект>\Assets
+4. Подтвердите замену файлов папки _Project.
+5. Откройте Unity и дождитесь окончания импорта и компиляции.
+
+АРХИВ СЕРВЕРА
+1. Остановите запущенный сервер.
+2. Сделайте резервную копию репозитория и базы данных.
+3. Распакуйте ColdVerdgeServer_Market_Condition.zip поверх корня
+   ColdVerdgeServer с заменой файлов.
+4. В CMD из корня ColdVerdgeServer выполните:
+
+   dotnet restore
+   dotnet build
+   dotnet test
+   dotnet ef migrations list --project src\ColdVerdge.Infrastructure --startup-project src\ColdVerdge.Api
+   dotnet ef database update --project src\ColdVerdge.Infrastructure --startup-project src\ColdVerdge.Api
+   dotnet run --project src\ColdVerdge.Api
+
+5. В списке миграций должны появиться:
+   20260723150000_CharacterProgressionV2
+   20260723160000_AddItemConditionInstances
+
+ЧТО ПРОВЕРИТЬ
+- Открывается новый экран MARKET.
+- Выбор оружия в нижней карусели обновляет крупную карточку.
+- VIEW PLAYER OFFERS открывает реальные предложения сервера.
+- В строке предложения отображается состояние конкретного экземпляра.
+- После покупки сохраняются тот же instanceId и conditionPercent.
+- При экипировке сервер проверяет требования и сохраняет instanceId.
+- Состояние оружия влияет на урон и точность.
+- Состояние одежды влияет на фактическую броню персонажа.
+- Auto Sort, обмен слотов и выбрасывание предмета сохраняют правильный
+  instanceId и conditionPercent.
+
+ВАЖНО
+- Рекомендуемый уровень остаётся рекомендацией и не блокирует покупку.
+- Требования экипировки проверяются сервером.
+- Старая запись количества предметов сохранена для совместимости.
+- Миграция создаёт отдельные экземпляры существующего оружия и одежды
+  со стартовым состоянием 100%.
