@@ -1,5 +1,7 @@
 using System.Data;
 using ColdVerdge.Domain.Entities;
+using ColdVerdge.Domain.Characters;
+using ColdVerdge.Domain.Items;
 using ColdVerdge.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +27,136 @@ public sealed class InventoryController : ControllerBase
     {
         _dbContext = dbContext;
     }
+
+    [HttpGet]
+    public async Task<ActionResult<InventoryStateResponse>> GetState(
+        Guid playerId,
+        CancellationToken cancellationToken)
+    {
+        bool exists = await _dbContext.Players
+            .AnyAsync(player => player.Id == playerId, cancellationToken);
+        if (!exists)
+            return NotFound();
+
+        List<PlayerInventoryItem> items = await _dbContext.PlayerInventoryItems
+            .AsNoTracking()
+            .Where(item => item.PlayerId == playerId)
+            .OrderBy(item => item.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+
+        return Ok(MapState(playerId, items));
+    }
+
+    [HttpPost("set-equipment")]
+    public async Task<ActionResult<SetEquipmentResponse>> SetEquipment(
+        Guid playerId,
+        SetEquipmentRequest request,
+        CancellationToken cancellationToken)
+    {
+        string slot = request.Slot.Trim().ToLowerInvariant();
+        string itemId = request.ItemId.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(request.RequestId) ||
+            string.IsNullOrWhiteSpace(slot))
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Invalid equipment request",
+                Detail = "requestId and slot are required.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        PlayerProgress? progress = await _dbContext.PlayerProgress
+            .SingleOrDefaultAsync(item => item.PlayerId == playerId, cancellationToken);
+        if (progress is null)
+            return NotFound();
+
+        PlayerInventoryItem? currentlyEquipped = await _dbContext.PlayerInventoryItems
+            .SingleOrDefaultAsync(
+                item => item.PlayerId == playerId && item.EquipmentSlot == slot,
+                cancellationToken);
+
+        if (itemId.Length == 0)
+        {
+            if (currentlyEquipped is not null)
+                currentlyEquipped.EquipmentSlot = null;
+        }
+        else
+        {
+            if (!ItemCatalog.TryGet(itemId, out ItemDefinition definition))
+                return BadRequest(EquipmentProblem("Unknown item."));
+            if (!string.Equals(definition.EquipmentSlot, slot, StringComparison.Ordinal))
+                return BadRequest(EquipmentProblem($"Item cannot be equipped in '{slot}'."));
+
+            IReadOnlyList<string> failures =
+                CharacterRules.ValidateEquipment(progress, definition.Requirements);
+            if (failures.Count > 0)
+            {
+                return UnprocessableEntity(new ProblemDetails
+                {
+                    Title = "Equipment requirements not met",
+                    Detail = string.Join(" ", failures),
+                    Status = StatusCodes.Status422UnprocessableEntity
+                });
+            }
+
+            PlayerInventoryItem? target = await _dbContext.PlayerInventoryItems
+                .SingleOrDefaultAsync(
+                    item => item.PlayerId == playerId && item.ItemId == itemId,
+                    cancellationToken);
+            if (target is null || target.Quantity < 1)
+                return Conflict(EquipmentProblem("The player does not own this item."));
+
+            if (currentlyEquipped is not null && currentlyEquipped.Id != target.Id)
+                currentlyEquipped.EquipmentSlot = null;
+            target.EquipmentSlot = slot;
+            target.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        List<PlayerInventoryItem> items = await _dbContext.PlayerInventoryItems
+            .AsNoTracking()
+            .Where(item => item.PlayerId == playerId)
+            .ToListAsync(cancellationToken);
+
+        return Ok(new SetEquipmentResponse
+        {
+            PlayerId = playerId,
+            RequestId = request.RequestId.Trim(),
+            Operation = "set_equipment",
+            ItemId = itemId,
+            EquipmentSlot = slot,
+            State = MapState(playerId, items)
+        });
+    }
+
+    private static ProblemDetails EquipmentProblem(string detail) => new()
+    {
+        Title = "Invalid equipment request",
+        Detail = detail,
+        Status = StatusCodes.Status400BadRequest
+    };
+
+    private static InventoryStateResponse MapState(
+        Guid playerId,
+        IEnumerable<PlayerInventoryItem> items) => new()
+    {
+        PlayerId = playerId,
+        Items = items
+            .Where(item => item.Quantity > 0)
+            .Select(item => new InventoryItemResponse(
+                item.ItemId,
+                item.Quantity,
+                item.UpdatedAtUtc))
+            .ToArray(),
+        Equipment = items
+            .Where(item => item.EquipmentSlot is not null)
+            .Select(item => new EquipmentItemResponse(
+                item.EquipmentSlot!,
+                item.ItemId,
+                item.UpdatedAtUtc))
+            .ToArray()
+    };
 
     [HttpPost("grant-resource")]
     public async Task<ActionResult<GrantResourceResponse>> GrantResource(
@@ -222,6 +354,40 @@ public sealed class InventoryController : ControllerBase
         };
     }
 }
+
+public sealed class SetEquipmentRequest
+{
+    public string RequestId { get; init; } = string.Empty;
+    public string Slot { get; init; } = string.Empty;
+    public string ItemId { get; init; } = string.Empty;
+}
+
+public sealed class SetEquipmentResponse
+{
+    public Guid PlayerId { get; init; }
+    public string RequestId { get; init; } = string.Empty;
+    public string Operation { get; init; } = string.Empty;
+    public string ItemId { get; init; } = string.Empty;
+    public string EquipmentSlot { get; init; } = string.Empty;
+    public InventoryStateResponse State { get; init; } = new();
+}
+
+public sealed class InventoryStateResponse
+{
+    public Guid PlayerId { get; init; }
+    public IReadOnlyList<InventoryItemResponse> Items { get; init; } = [];
+    public IReadOnlyList<EquipmentItemResponse> Equipment { get; init; } = [];
+}
+
+public sealed record InventoryItemResponse(
+    string ItemId,
+    int Quantity,
+    DateTimeOffset UpdatedAtUtc);
+
+public sealed record EquipmentItemResponse(
+    string Slot,
+    string ItemId,
+    DateTimeOffset UpdatedAtUtc);
 
 public sealed class GrantResourceRequest
 {

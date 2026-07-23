@@ -12,4 +12,6 @@ public sealed class Player
         DateTimeOffset.UtcNow;
 
     public PlayerWallet Wallet { get; set; } = null!;
+
+    public PlayerProgress Progress { get; set; } = null!;
 }

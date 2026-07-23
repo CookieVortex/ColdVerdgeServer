@@ -65,6 +65,15 @@ public sealed class PlayersController : ControllerBase
             {
                 Gold = 0,
                 Copper = 0
+            },
+            Progress = new PlayerProgress
+            {
+                Level = 1,
+                Strength = 10,
+                Endurance = 10,
+                Agility = 10,
+                Perception = 10,
+                Intelligence = 10
             }
         };
 
@@ -90,6 +99,7 @@ public sealed class PlayersController : ControllerBase
         var player = await _dbContext.Players
             .AsNoTracking()
             .Include(item => item.Wallet)
+            .Include(item => item.Progress)
             .SingleOrDefaultAsync(
                 item => item.Id == playerId,
                 cancellationToken);
@@ -110,7 +120,56 @@ public sealed class PlayersController : ControllerBase
             UserName = player.UserName,
             Gold = player.Wallet.Gold,
             Copper = player.Wallet.Copper,
+            Progress = PlayerProgressResponse.FromEntity(player.Progress),
             CreatedAtUtc = player.CreatedAtUtc
         };
     }
+}
+
+public sealed class PlayerProgressResponse
+{
+    public int Level { get; init; }
+    public int CurrentExperience { get; init; }
+    public int ExperienceToNextLevel { get; init; }
+    public int FreeAttributePoints { get; init; }
+    public int Strength { get; init; }
+    public int Endurance { get; init; }
+    public int Agility { get; init; }
+    public int Perception { get; init; }
+    public int Intelligence { get; init; }
+    public string ProfessionId { get; init; } = string.Empty;
+    public int ProfessionExperience { get; init; }
+    public int PistolsExperience { get; init; }
+    public int SubmachineGunsExperience { get; init; }
+    public int AssaultRiflesExperience { get; init; }
+    public int ShotgunsExperience { get; init; }
+    public int SniperRiflesExperience { get; init; }
+    public int MachineGunsExperience { get; init; }
+    public int ThrowablesExperience { get; init; }
+    public int MedicineExperience { get; init; }
+    public DateTimeOffset UpdatedAtUtc { get; init; }
+
+    public static PlayerProgressResponse FromEntity(PlayerProgress progress) => new()
+    {
+        Level = progress.Level,
+        CurrentExperience = progress.CurrentExperience,
+        ExperienceToNextLevel = Math.Max(100, progress.Level * 100),
+        FreeAttributePoints = progress.FreeAttributePoints,
+        Strength = progress.Strength,
+        Endurance = progress.Endurance,
+        Agility = progress.Agility,
+        Perception = progress.Perception,
+        Intelligence = progress.Intelligence,
+        ProfessionId = progress.ProfessionId,
+        ProfessionExperience = progress.ProfessionExperience,
+        PistolsExperience = progress.Pistols,
+        SubmachineGunsExperience = progress.SubmachineGuns,
+        AssaultRiflesExperience = progress.AssaultRifles,
+        ShotgunsExperience = progress.Shotguns,
+        SniperRiflesExperience = progress.SniperRifles,
+        MachineGunsExperience = progress.MachineGuns,
+        ThrowablesExperience = progress.Throwables,
+        MedicineExperience = progress.Medicine,
+        UpdatedAtUtc = progress.UpdatedAtUtc
+    };
 }

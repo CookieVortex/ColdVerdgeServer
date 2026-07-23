@@ -14,6 +14,8 @@ public sealed class GameDbContext : DbContext
 
     public DbSet<PlayerWallet> PlayerWallets => Set<PlayerWallet>();
 
+    public DbSet<PlayerProgress> PlayerProgress => Set<PlayerProgress>();
+
     public DbSet<WalletTransaction> WalletTransactions =>
         Set<WalletTransaction>();
 
@@ -29,6 +31,7 @@ public sealed class GameDbContext : DbContext
 
         ConfigurePlayer(modelBuilder);
         ConfigurePlayerWallet(modelBuilder);
+        ConfigurePlayerProgress(modelBuilder);
         ConfigureWalletTransaction(modelBuilder);
         ConfigurePlayerInventoryItem(modelBuilder);
         ConfigureInventoryGrant(modelBuilder);
@@ -66,6 +69,39 @@ public sealed class GameDbContext : DbContext
             .WithOne(wallet => wallet.Player)
             .HasForeignKey<PlayerWallet>(wallet => wallet.PlayerId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        entity.HasOne(player => player.Progress)
+            .WithOne(progress => progress.Player)
+            .HasForeignKey<PlayerProgress>(progress => progress.PlayerId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+
+    private static void ConfigurePlayerProgress(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<PlayerProgress>();
+
+        entity.ToTable("player_progress");
+        entity.HasKey(progress => progress.PlayerId);
+        entity.Property(progress => progress.PlayerId).HasColumnName("player_id");
+        entity.Property(progress => progress.Level).HasColumnName("level").HasDefaultValue(1).IsRequired();
+        entity.Property(progress => progress.CurrentExperience).HasColumnName("current_experience").HasDefaultValue(0).IsRequired();
+        entity.Property(progress => progress.FreeAttributePoints).HasColumnName("free_attribute_points").HasDefaultValue(0).IsRequired();
+        entity.Property(progress => progress.Strength).HasColumnName("strength").HasDefaultValue(10).IsRequired();
+        entity.Property(progress => progress.Endurance).HasColumnName("endurance").HasDefaultValue(10).IsRequired();
+        entity.Property(progress => progress.Agility).HasColumnName("agility").HasDefaultValue(10).IsRequired();
+        entity.Property(progress => progress.Perception).HasColumnName("perception").HasDefaultValue(10).IsRequired();
+        entity.Property(progress => progress.Intelligence).HasColumnName("intelligence").HasDefaultValue(10).IsRequired();
+        entity.Property(progress => progress.ProfessionId).HasColumnName("profession_id").HasMaxLength(64).HasDefaultValue("").IsRequired();
+        entity.Property(progress => progress.ProfessionExperience).HasColumnName("profession_experience").HasDefaultValue(0).IsRequired();
+        entity.Property(progress => progress.Pistols).HasColumnName("pistols").HasDefaultValue(0).IsRequired();
+        entity.Property(progress => progress.SubmachineGuns).HasColumnName("submachine_guns").HasDefaultValue(0).IsRequired();
+        entity.Property(progress => progress.AssaultRifles).HasColumnName("assault_rifles").HasDefaultValue(0).IsRequired();
+        entity.Property(progress => progress.Shotguns).HasColumnName("shotguns").HasDefaultValue(0).IsRequired();
+        entity.Property(progress => progress.SniperRifles).HasColumnName("sniper_rifles").HasDefaultValue(0).IsRequired();
+        entity.Property(progress => progress.MachineGuns).HasColumnName("machine_guns").HasDefaultValue(0).IsRequired();
+        entity.Property(progress => progress.Throwables).HasColumnName("throwables").HasDefaultValue(0).IsRequired();
+        entity.Property(progress => progress.Medicine).HasColumnName("medicine").HasDefaultValue(0).IsRequired();
+        entity.Property(progress => progress.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
     }
 
     private static void ConfigurePlayerWallet(ModelBuilder modelBuilder)
@@ -186,6 +222,14 @@ public sealed class GameDbContext : DbContext
         entity.Property(item => item.Quantity)
             .HasColumnName("quantity")
             .IsRequired();
+
+        entity.Property(item => item.EquipmentSlot)
+            .HasColumnName("equipment_slot")
+            .HasMaxLength(32);
+
+        entity.HasIndex(item => new { item.PlayerId, item.EquipmentSlot })
+            .IsUnique()
+            .HasFilter("equipment_slot IS NOT NULL");
 
         entity.Property(item => item.CreatedAtUtc)
             .HasColumnName("created_at_utc")

@@ -118,6 +118,11 @@ namespace ColdVerdge.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("item_id");
 
+                    b.Property<string>("EquipmentSlot")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("equipment_slot");
+
                     b.Property<Guid>("PlayerId")
                         .HasColumnType("uuid")
                         .HasColumnName("player_id");
@@ -135,10 +140,41 @@ namespace ColdVerdge.Infrastructure.Persistence.Migrations
                     b.HasIndex("PlayerId", "ItemId")
                         .IsUnique();
 
+                    b.HasIndex("PlayerId", "EquipmentSlot")
+                        .IsUnique()
+                        .HasFilter("equipment_slot IS NOT NULL");
+
                     b.ToTable("player_inventory_items", null, t =>
                         {
                             t.HasCheckConstraint("ck_player_inventory_items_quantity_positive", "quantity > 0");
                         });
+                });
+
+            modelBuilder.Entity("ColdVerdge.Domain.Entities.PlayerProgress", b =>
+                {
+                    b.Property<Guid>("PlayerId").HasColumnType("uuid").HasColumnName("player_id");
+                    b.Property<int>("Agility").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(10).HasColumnName("agility");
+                    b.Property<int>("AssaultRifles").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(0).HasColumnName("assault_rifles");
+                    b.Property<int>("CurrentExperience").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(0).HasColumnName("current_experience");
+                    b.Property<int>("Endurance").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(10).HasColumnName("endurance");
+                    b.Property<int>("FreeAttributePoints").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(0).HasColumnName("free_attribute_points");
+                    b.Property<int>("Intelligence").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(10).HasColumnName("intelligence");
+                    b.Property<int>("Level").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(1).HasColumnName("level");
+                    b.Property<int>("MachineGuns").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(0).HasColumnName("machine_guns");
+                    b.Property<int>("Medicine").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(0).HasColumnName("medicine");
+                    b.Property<int>("Perception").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(10).HasColumnName("perception");
+                    b.Property<int>("Pistols").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(0).HasColumnName("pistols");
+                    b.Property<int>("ProfessionExperience").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(0).HasColumnName("profession_experience");
+                    b.Property<string>("ProfessionId").IsRequired().ValueGeneratedOnAdd().HasMaxLength(64).HasColumnType("character varying(64)").HasDefaultValue("").HasColumnName("profession_id");
+                    b.Property<int>("Shotguns").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(0).HasColumnName("shotguns");
+                    b.Property<int>("SniperRifles").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(0).HasColumnName("sniper_rifles");
+                    b.Property<int>("Strength").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(10).HasColumnName("strength");
+                    b.Property<int>("SubmachineGuns").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(0).HasColumnName("submachine_guns");
+                    b.Property<int>("Throwables").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(0).HasColumnName("throwables");
+                    b.Property<DateTimeOffset>("UpdatedAtUtc").HasColumnType("timestamp with time zone").HasColumnName("updated_at_utc");
+
+                    b.HasKey("PlayerId");
+                    b.ToTable("player_progress", (string)null);
                 });
 
             modelBuilder.Entity("ColdVerdge.Domain.Entities.PlayerWallet", b =>
@@ -167,6 +203,17 @@ namespace ColdVerdge.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_player_wallets_gold_non_negative", "gold >= 0");
                         });
+                });
+
+            modelBuilder.Entity("ColdVerdge.Domain.Entities.PlayerProgress", b =>
+                {
+                    b.HasOne("ColdVerdge.Domain.Entities.Player", "Player")
+                        .WithOne("Progress")
+                        .HasForeignKey("ColdVerdge.Domain.Entities.PlayerProgress", "PlayerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Player");
                 });
 
             modelBuilder.Entity("ColdVerdge.Domain.Entities.WalletTransaction", b =>
@@ -264,6 +311,9 @@ namespace ColdVerdge.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("ColdVerdge.Domain.Entities.Player", b =>
                 {
+                    b.Navigation("Progress")
+                        .IsRequired();
+
                     b.Navigation("Wallet")
                         .IsRequired();
                 });

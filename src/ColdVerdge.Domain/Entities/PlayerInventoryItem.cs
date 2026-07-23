@@ -10,6 +10,8 @@ public sealed class PlayerInventoryItem
 
     public int Quantity { get; set; }
 
+    public string? EquipmentSlot { get; set; }
+
     public DateTimeOffset CreatedAtUtc { get; set; } =
         DateTimeOffset.UtcNow;
 

@@ -10,5 +10,7 @@ public sealed class PlayerResponse
 
     public long Copper { get; init; }
 
+    public ColdVerdge.Api.Controllers.PlayerProgressResponse Progress { get; init; } = new();
+
     public DateTimeOffset CreatedAtUtc { get; init; }
 }
