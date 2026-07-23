@@ -1,4 +1,6 @@
+using System.Data;
 using ColdVerdge.Domain.Entities;
+using ColdVerdge.Api.GameData;
 using ColdVerdge.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,9 +11,6 @@ namespace ColdVerdge.Api.Controllers;
 [Route("api/players/{playerId:guid}/shop")]
 public sealed class ShopController : ControllerBase
 {
-    private const string WeaponItemId = "ak";
-    private const int WeaponPriceCopper = 180;
-
     private readonly GameDbContext _dbContext;
 
     public ShopController(GameDbContext dbContext)
@@ -25,7 +24,8 @@ public sealed class ShopController : ControllerBase
         BuyWeaponRequest request,
         CancellationToken cancellationToken)
     {
-        string requestId = request.RequestId.Trim();
+        string requestId = (request.RequestId ?? string.Empty).Trim();
+        string weaponItemId = (request.WeaponId ?? string.Empty).Trim().ToLowerInvariant();
 
         if (requestId.Length is < 1 or > 64)
         {
@@ -33,6 +33,19 @@ public sealed class ShopController : ControllerBase
             {
                 Title = "Invalid requestId",
                 Detail = "requestId must contain between 1 and 64 characters.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        if (!GameItemCatalog.TryGetShopWeapon(
+                weaponItemId,
+                out int weaponPriceCopper,
+                out int requiredLevel))
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Unknown weapon",
+                Detail = "The requested weapon is not available in this shop.",
                 Status = StatusCodes.Status400BadRequest
             });
         }
@@ -48,21 +61,23 @@ public sealed class ShopController : ControllerBase
 
         if (existingTransaction is not null)
         {
+            string processedItemId = ResolvePurchasedWeaponId(existingTransaction, weaponItemId);
+            GameItemCatalog.TryGetShopWeapon(processedItemId, out int processedPriceCopper, out _);
             PlayerInventoryItem? existingItem =
                 await _dbContext.PlayerInventoryItems
                     .AsNoTracking()
                     .SingleOrDefaultAsync(
                         item =>
                             item.PlayerId == playerId &&
-                            item.ItemId == WeaponItemId,
+                            item.ItemId == processedItemId,
                         cancellationToken);
 
             return Ok(new BuyWeaponResponse
             {
                 PlayerId = playerId,
-                ItemId = WeaponItemId,
+                ItemId = processedItemId,
                 Quantity = existingItem?.Quantity ?? 0,
-                PriceCopper = WeaponPriceCopper,
+                PriceCopper = processedPriceCopper,
                 CopperAfter = existingTransaction.BalanceAfter,
                 TransactionId = existingTransaction.Id,
                 WasAlreadyProcessed = true
@@ -72,6 +87,32 @@ public sealed class ShopController : ControllerBase
         await using var databaseTransaction =
             await _dbContext.Database.BeginTransactionAsync(
                 cancellationToken);
+
+        Player? player = await _dbContext.Players
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == playerId,
+                cancellationToken);
+
+        if (player is null)
+        {
+            return NotFound(new ProblemDetails
+            {
+                Title = "Player not found",
+                Detail = "Player was not found.",
+                Status = StatusCodes.Status404NotFound
+            });
+        }
+
+        if (requiredLevel > 0 && player.Level < requiredLevel)
+        {
+            return Conflict(new ProblemDetails
+            {
+                Title = "Level requirement not met",
+                Detail = $"The weapon requires level {requiredLevel}. Current level is {player.Level}.",
+                Status = StatusCodes.Status409Conflict
+            });
+        }
 
         PlayerWallet? wallet = await _dbContext.PlayerWallets
             .SingleOrDefaultAsync(
@@ -88,13 +129,13 @@ public sealed class ShopController : ControllerBase
             });
         }
 
-        if (wallet.Copper < WeaponPriceCopper)
+        if (wallet.Copper < weaponPriceCopper)
         {
             return Conflict(new ProblemDetails
             {
                 Title = "Insufficient funds",
                 Detail =
-                    $"The weapon costs {WeaponPriceCopper} copper. " +
+                    $"The weapon costs {weaponPriceCopper} copper. " +
                     $"Current balance is {wallet.Copper}.",
                 Status = StatusCodes.Status409Conflict
             });
@@ -105,7 +146,7 @@ public sealed class ShopController : ControllerBase
                 .SingleOrDefaultAsync(
                     item =>
                         item.PlayerId == playerId &&
-                        item.ItemId == WeaponItemId,
+                        item.ItemId == weaponItemId,
                     cancellationToken);
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -116,7 +157,7 @@ public sealed class ShopController : ControllerBase
             {
                 Id = Guid.NewGuid(),
                 PlayerId = playerId,
-                ItemId = WeaponItemId,
+                ItemId = weaponItemId,
                 Quantity = 1,
                 CreatedAtUtc = now,
                 UpdatedAtUtc = now
@@ -144,7 +185,7 @@ public sealed class ShopController : ControllerBase
             inventoryItem.UpdatedAtUtc = now;
         }
 
-        wallet.Copper -= WeaponPriceCopper;
+        wallet.Copper -= weaponPriceCopper;
 
         var walletTransaction = new WalletTransaction
         {
@@ -152,9 +193,9 @@ public sealed class ShopController : ControllerBase
             PlayerId = playerId,
             RequestId = requestId,
             Currency = "copper",
-            Amount = -WeaponPriceCopper,
+            Amount = -weaponPriceCopper,
             BalanceAfter = wallet.Copper,
-            Reason = $"shop_purchase:{WeaponItemId}",
+            Reason = $"shop_purchase:{weaponItemId}",
             CreatedAtUtc = now
         };
 
@@ -182,21 +223,24 @@ public sealed class ShopController : ControllerBase
             if (duplicateTransaction is null)
                 throw;
 
+            string processedItemId = ResolvePurchasedWeaponId(duplicateTransaction, weaponItemId);
+            GameItemCatalog.TryGetShopWeapon(processedItemId, out int processedPriceCopper, out _);
+
             PlayerInventoryItem? duplicateItem =
                 await _dbContext.PlayerInventoryItems
                     .AsNoTracking()
                     .SingleOrDefaultAsync(
                         item =>
                             item.PlayerId == playerId &&
-                            item.ItemId == WeaponItemId,
+                            item.ItemId == processedItemId,
                         cancellationToken);
 
             return Ok(new BuyWeaponResponse
             {
                 PlayerId = playerId,
-                ItemId = WeaponItemId,
+                ItemId = processedItemId,
                 Quantity = duplicateItem?.Quantity ?? 0,
-                PriceCopper = WeaponPriceCopper,
+                PriceCopper = processedPriceCopper,
                 CopperAfter = duplicateTransaction.BalanceAfter,
                 TransactionId = duplicateTransaction.Id,
                 WasAlreadyProcessed = true
@@ -206,13 +250,301 @@ public sealed class ShopController : ControllerBase
         return Ok(new BuyWeaponResponse
         {
             PlayerId = playerId,
-            ItemId = WeaponItemId,
+            ItemId = weaponItemId,
             Quantity = inventoryItem.Quantity,
-            PriceCopper = WeaponPriceCopper,
+            PriceCopper = weaponPriceCopper,
             CopperAfter = wallet.Copper,
             TransactionId = walletTransaction.Id,
             WasAlreadyProcessed = false
         });
+    }
+
+    [HttpGet("market/weapons")]
+    public async Task<ActionResult<MarketWeaponCatalogResponse>> GetMarketWeapons(
+        Guid playerId,
+        CancellationToken cancellationToken)
+    {
+        if (!await _dbContext.Players.AsNoTracking().AnyAsync(player => player.Id == playerId, cancellationToken))
+            return NotFound();
+
+        List<MarketWeaponSummaryResponse> summaries = await _dbContext.MarketOffers
+            .AsNoTracking()
+            .Where(offer => offer.Status == "active")
+            .GroupBy(offer => offer.ItemId)
+            .Select(group => new MarketWeaponSummaryResponse
+            {
+                ItemId = group.Key,
+                OfferCount = group.Count(),
+                LowestPriceCopper = group.Min(offer => offer.PriceCopper),
+                AveragePriceCopper = (int)Math.Round(group.Average(offer => offer.PriceCopper))
+            })
+            .OrderBy(summary => summary.LowestPriceCopper)
+            .ThenBy(summary => summary.ItemId)
+            .ToListAsync(cancellationToken);
+
+        return Ok(new MarketWeaponCatalogResponse
+        {
+            Weapons = summaries.Where(summary =>
+                GameItemCatalog.TryGetShopWeapon(summary.ItemId, out _, out _)).ToArray()
+        });
+    }
+
+    [HttpGet("market/weapons/{weaponItemId}/offers")]
+    public async Task<ActionResult<MarketOfferListResponse>> GetMarketOffers(
+        Guid playerId,
+        string weaponItemId,
+        CancellationToken cancellationToken)
+    {
+        string itemId = (weaponItemId ?? string.Empty).Trim().ToLowerInvariant();
+        if (!GameItemCatalog.TryGetShopWeapon(itemId, out _, out _))
+            return BadRequest(new ProblemDetails { Title = "Unknown weapon", Status = StatusCodes.Status400BadRequest });
+
+        if (!await _dbContext.Players.AsNoTracking().AnyAsync(player => player.Id == playerId, cancellationToken))
+            return NotFound();
+
+        MarketOfferResponse[] offers = await _dbContext.MarketOffers
+            .AsNoTracking()
+            .Where(offer => offer.ItemId == itemId && offer.Status == "active")
+            .OrderBy(offer => offer.PriceCopper)
+            .ThenBy(offer => offer.CreatedAtUtc)
+            .Select(offer => new MarketOfferResponse
+            {
+                OfferId = offer.Id,
+                SellerPlayerId = offer.SellerPlayerId,
+                SellerName = offer.SellerPlayer.UserName,
+                ItemId = offer.ItemId,
+                PriceCopper = offer.PriceCopper,
+                CreatedAtUtc = offer.CreatedAtUtc
+            })
+            .ToArrayAsync(cancellationToken);
+
+        return Ok(new MarketOfferListResponse { ItemId = itemId, Offers = offers });
+    }
+
+    [HttpPost("market/create-offer")]
+    public async Task<ActionResult<MarketOfferResponse>> CreateMarketOffer(
+        Guid playerId,
+        CreateMarketOfferRequest request,
+        CancellationToken cancellationToken)
+    {
+        string requestId = (request.RequestId ?? string.Empty).Trim();
+        string itemId = (request.WeaponId ?? string.Empty).Trim().ToLowerInvariant();
+        if (requestId.Length is < 1 or > 64)
+            return BadRequest(new ProblemDetails { Title = "Invalid requestId", Status = StatusCodes.Status400BadRequest });
+        if (request.PriceCopper is < 1 or > 10_000_000)
+            return BadRequest(new ProblemDetails { Title = "Invalid offer price", Status = StatusCodes.Status400BadRequest });
+        if (!GameItemCatalog.TryGetShopWeapon(itemId, out _, out _))
+            return BadRequest(new ProblemDetails { Title = "Unknown weapon", Status = StatusCodes.Status400BadRequest });
+
+        MarketOffer? existing = await _dbContext.MarketOffers
+            .AsNoTracking()
+            .Include(offer => offer.SellerPlayer)
+            .SingleOrDefaultAsync(
+                offer => offer.SellerPlayerId == playerId && offer.CreateRequestId == requestId,
+                cancellationToken);
+        if (existing is not null)
+        {
+            if (existing.ItemId != itemId || existing.PriceCopper != request.PriceCopper)
+                return Conflict(new ProblemDetails { Title = "Request identifier was already used", Status = StatusCodes.Status409Conflict });
+            return Ok(MapOffer(existing));
+        }
+
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable,
+            cancellationToken);
+
+        Player? seller = await _dbContext.Players.SingleOrDefaultAsync(player => player.Id == playerId, cancellationToken);
+        if (seller is null)
+            return NotFound();
+
+        PlayerInventoryItem? inventoryItem = await _dbContext.PlayerInventoryItems.SingleOrDefaultAsync(
+            item => item.PlayerId == playerId && item.ItemId == itemId,
+            cancellationToken);
+        if (inventoryItem is null || inventoryItem.Quantity < 1)
+            return Conflict(new ProblemDetails { Title = "Weapon is not owned", Status = StatusCodes.Status409Conflict });
+
+        bool isEquipped = await _dbContext.PlayerEquipmentItems.AsNoTracking().AnyAsync(
+            item => item.PlayerId == playerId && item.ItemId == itemId,
+            cancellationToken);
+        if (isEquipped && inventoryItem.Quantity <= 1)
+            return Conflict(new ProblemDetails { Title = "Equipped weapon cannot be offered", Status = StatusCodes.Status409Conflict });
+
+        inventoryItem.Quantity--;
+        if (inventoryItem.Quantity == 0)
+            _dbContext.PlayerInventoryItems.Remove(inventoryItem);
+        else
+            inventoryItem.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        var offer = new MarketOffer
+        {
+            Id = Guid.NewGuid(),
+            SellerPlayerId = playerId,
+            CreateRequestId = requestId,
+            ItemId = itemId,
+            PriceCopper = request.PriceCopper,
+            Status = "active",
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            SellerPlayer = seller
+        };
+        _dbContext.MarketOffers.Add(offer);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return Ok(MapOffer(offer));
+    }
+
+    [HttpPost("market/buy-offer")]
+    public async Task<ActionResult<BuyMarketOfferResponse>> BuyMarketOffer(
+        Guid playerId,
+        BuyMarketOfferRequest request,
+        CancellationToken cancellationToken)
+    {
+        string requestId = (request.RequestId ?? string.Empty).Trim();
+        if (requestId.Length is < 1 or > 64)
+            return BadRequest(new ProblemDetails { Title = "Invalid requestId", Status = StatusCodes.Status400BadRequest });
+
+        WalletTransaction? previousPurchase = await _dbContext.WalletTransactions.AsNoTracking().SingleOrDefaultAsync(
+            entry => entry.PlayerId == playerId && entry.RequestId == requestId,
+            cancellationToken);
+        if (previousPurchase is not null)
+            return await ReturnExistingMarketPurchase(playerId, previousPurchase, cancellationToken);
+
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable,
+            cancellationToken);
+
+        MarketOffer? offer = await _dbContext.MarketOffers
+            .Include(item => item.SellerPlayer)
+            .SingleOrDefaultAsync(item => item.Id == request.OfferId, cancellationToken);
+        if (offer is null)
+            return NotFound(new ProblemDetails { Title = "Offer not found", Status = StatusCodes.Status404NotFound });
+        if (offer.Status != "active")
+            return Conflict(new ProblemDetails { Title = "Offer is no longer available", Status = StatusCodes.Status409Conflict });
+        if (offer.SellerPlayerId == playerId)
+            return Conflict(new ProblemDetails { Title = "You cannot buy your own offer", Status = StatusCodes.Status409Conflict });
+
+        Player? buyer = await _dbContext.Players.AsNoTracking().SingleOrDefaultAsync(item => item.Id == playerId, cancellationToken);
+        if (buyer is null)
+            return NotFound();
+        GameItemCatalog.TryGetShopWeapon(offer.ItemId, out _, out int requiredLevel);
+        if (buyer.Level < requiredLevel)
+            return Conflict(new ProblemDetails { Title = "Level requirement not met", Status = StatusCodes.Status409Conflict });
+
+        PlayerWallet? buyerWallet = await _dbContext.PlayerWallets.SingleOrDefaultAsync(item => item.PlayerId == playerId, cancellationToken);
+        PlayerWallet? sellerWallet = await _dbContext.PlayerWallets.SingleOrDefaultAsync(item => item.PlayerId == offer.SellerPlayerId, cancellationToken);
+        if (buyerWallet is null || sellerWallet is null)
+            return NotFound(new ProblemDetails { Title = "Wallet not found", Status = StatusCodes.Status404NotFound });
+        if (buyerWallet.Copper < offer.PriceCopper)
+            return Conflict(new ProblemDetails { Title = "Insufficient funds", Status = StatusCodes.Status409Conflict });
+
+        PlayerInventoryItem? buyerItem = await _dbContext.PlayerInventoryItems.SingleOrDefaultAsync(
+            item => item.PlayerId == playerId && item.ItemId == offer.ItemId,
+            cancellationToken);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (buyerItem is null)
+        {
+            buyerItem = new PlayerInventoryItem
+            {
+                Id = Guid.NewGuid(), PlayerId = playerId, ItemId = offer.ItemId,
+                Quantity = 1, CreatedAtUtc = now, UpdatedAtUtc = now
+            };
+            _dbContext.PlayerInventoryItems.Add(buyerItem);
+        }
+        else
+        {
+            buyerItem.Quantity = checked(buyerItem.Quantity + 1);
+            buyerItem.UpdatedAtUtc = now;
+        }
+
+        buyerWallet.Copper -= offer.PriceCopper;
+        sellerWallet.Copper += offer.PriceCopper;
+        offer.Status = "sold";
+        offer.BuyerPlayerId = playerId;
+        offer.SoldAtUtc = now;
+
+        var buyerTransaction = new WalletTransaction
+        {
+            Id = Guid.NewGuid(), PlayerId = playerId, RequestId = requestId,
+            Currency = "copper", Amount = -offer.PriceCopper, BalanceAfter = buyerWallet.Copper,
+            Reason = $"market_purchase:{offer.Id:N}", CreatedAtUtc = now
+        };
+        _dbContext.WalletTransactions.Add(buyerTransaction);
+        _dbContext.WalletTransactions.Add(new WalletTransaction
+        {
+            Id = Guid.NewGuid(), PlayerId = offer.SellerPlayerId, RequestId = $"market-sale-{offer.Id:N}",
+            Currency = "copper", Amount = offer.PriceCopper, BalanceAfter = sellerWallet.Copper,
+            Reason = $"market_sale:{offer.Id:N}", CreatedAtUtc = now
+        });
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return Ok(new BuyMarketOfferResponse
+        {
+            OfferId = offer.Id,
+            ItemId = offer.ItemId,
+            SellerName = offer.SellerPlayer.UserName,
+            PriceCopper = offer.PriceCopper,
+            CopperAfter = buyerWallet.Copper,
+            QuantityAfter = buyerItem.Quantity,
+            TransactionId = buyerTransaction.Id,
+            WasAlreadyProcessed = false
+        });
+    }
+
+    private async Task<ActionResult<BuyMarketOfferResponse>> ReturnExistingMarketPurchase(
+        Guid playerId,
+        WalletTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        const string prefix = "market_purchase:";
+        if (!transaction.Reason.StartsWith(prefix, StringComparison.Ordinal) ||
+            !Guid.TryParseExact(transaction.Reason[prefix.Length..], "N", out Guid offerId))
+        {
+            return Conflict(new ProblemDetails { Title = "Request identifier was already used", Status = StatusCodes.Status409Conflict });
+        }
+
+        MarketOffer? offer = await _dbContext.MarketOffers.AsNoTracking()
+            .Include(item => item.SellerPlayer)
+            .SingleOrDefaultAsync(item => item.Id == offerId && item.BuyerPlayerId == playerId, cancellationToken);
+        if (offer is null)
+            return NotFound();
+        int quantity = await _dbContext.PlayerInventoryItems.AsNoTracking()
+            .Where(item => item.PlayerId == playerId && item.ItemId == offer.ItemId)
+            .Select(item => item.Quantity)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return Ok(new BuyMarketOfferResponse
+        {
+            OfferId = offer.Id, ItemId = offer.ItemId, SellerName = offer.SellerPlayer.UserName,
+            PriceCopper = offer.PriceCopper, CopperAfter = transaction.BalanceAfter,
+            QuantityAfter = quantity, TransactionId = transaction.Id, WasAlreadyProcessed = true
+        });
+    }
+
+    private static MarketOfferResponse MapOffer(MarketOffer offer) => new()
+    {
+        OfferId = offer.Id,
+        SellerPlayerId = offer.SellerPlayerId,
+        SellerName = offer.SellerPlayer.UserName,
+        ItemId = offer.ItemId,
+        PriceCopper = offer.PriceCopper,
+        CreatedAtUtc = offer.CreatedAtUtc
+    };
+
+    private static string ResolvePurchasedWeaponId(
+        WalletTransaction transaction,
+        string fallbackWeaponId)
+    {
+        const string reasonPrefix = "shop_purchase:";
+        if (!string.IsNullOrWhiteSpace(transaction.Reason) &&
+            transaction.Reason.StartsWith(reasonPrefix, StringComparison.Ordinal))
+        {
+            string itemId = transaction.Reason[reasonPrefix.Length..];
+            if (GameItemCatalog.TryGetShopWeapon(itemId, out _, out _))
+                return itemId;
+        }
+
+        return fallbackWeaponId;
     }
 
     [HttpGet("inventory")]
@@ -257,6 +589,8 @@ public sealed class ShopController : ControllerBase
 public sealed class BuyWeaponRequest
 {
     public string RequestId { get; init; } = string.Empty;
+
+    public string WeaponId { get; init; } = string.Empty;
 }
 
 public sealed class BuyWeaponResponse
@@ -283,4 +617,58 @@ public sealed class PlayerInventoryItemResponse
     public int Quantity { get; init; }
 
     public DateTimeOffset UpdatedAtUtc { get; init; }
+}
+
+public sealed class MarketWeaponSummaryResponse
+{
+    public string ItemId { get; init; } = string.Empty;
+    public int OfferCount { get; init; }
+    public int LowestPriceCopper { get; init; }
+    public int AveragePriceCopper { get; init; }
+}
+
+public sealed class MarketWeaponCatalogResponse
+{
+    public IReadOnlyList<MarketWeaponSummaryResponse> Weapons { get; init; } = [];
+}
+
+public sealed class MarketOfferResponse
+{
+    public Guid OfferId { get; init; }
+    public Guid SellerPlayerId { get; init; }
+    public string SellerName { get; init; } = string.Empty;
+    public string ItemId { get; init; } = string.Empty;
+    public int PriceCopper { get; init; }
+    public DateTimeOffset CreatedAtUtc { get; init; }
+}
+
+public sealed class MarketOfferListResponse
+{
+    public string ItemId { get; init; } = string.Empty;
+    public IReadOnlyList<MarketOfferResponse> Offers { get; init; } = [];
+}
+
+public sealed class CreateMarketOfferRequest
+{
+    public string RequestId { get; init; } = string.Empty;
+    public string WeaponId { get; init; } = string.Empty;
+    public int PriceCopper { get; init; }
+}
+
+public sealed class BuyMarketOfferRequest
+{
+    public string RequestId { get; init; } = string.Empty;
+    public Guid OfferId { get; init; }
+}
+
+public sealed class BuyMarketOfferResponse
+{
+    public Guid OfferId { get; init; }
+    public string ItemId { get; init; } = string.Empty;
+    public string SellerName { get; init; } = string.Empty;
+    public int PriceCopper { get; init; }
+    public long CopperAfter { get; init; }
+    public int QuantityAfter { get; init; }
+    public Guid TransactionId { get; init; }
+    public bool WasAlreadyProcessed { get; init; }
 }

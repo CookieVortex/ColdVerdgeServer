@@ -3,6 +3,7 @@ using System;
 using ColdVerdge.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ColdVerdge.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(GameDbContext))]
-    partial class GameDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260722042347_AddPlayerProfession")]
+    partial class AddPlayerProfession
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -125,66 +128,6 @@ namespace ColdVerdge.Infrastructure.Persistence.Migrations
                     b.ToTable("inventory_mutations", null, t =>
                         {
                             t.HasCheckConstraint("ck_inventory_mutations_quantity_after_non_negative", "quantity_after >= 0");
-                        });
-                });
-
-            modelBuilder.Entity("ColdVerdge.Domain.Entities.MarketOffer", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<Guid?>("BuyerPlayerId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("buyer_player_id");
-
-                    b.Property<string>("CreateRequestId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("create_request_id");
-
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<string>("ItemId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("item_id");
-
-                    b.Property<int>("PriceCopper")
-                        .HasColumnType("integer")
-                        .HasColumnName("price_copper");
-
-                    b.Property<Guid>("SellerPlayerId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("seller_player_id");
-
-                    b.Property<DateTimeOffset?>("SoldAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("sold_at_utc");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("status");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SellerPlayerId", "CreateRequestId")
-                        .IsUnique();
-
-                    b.HasIndex("ItemId", "Status", "PriceCopper", "CreatedAtUtc");
-
-                    b.ToTable("market_offers", null, t =>
-                        {
-                            t.HasCheckConstraint("ck_market_offers_price_positive", "price_copper > 0");
-
-                            t.HasCheckConstraint("ck_market_offers_status_supported", "status IN ('active', 'sold', 'cancelled')");
                         });
                 });
 
@@ -563,17 +506,6 @@ namespace ColdVerdge.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Player");
-                });
-
-            modelBuilder.Entity("ColdVerdge.Domain.Entities.MarketOffer", b =>
-                {
-                    b.HasOne("ColdVerdge.Domain.Entities.Player", "SellerPlayer")
-                        .WithMany()
-                        .HasForeignKey("SellerPlayerId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("SellerPlayer");
                 });
 
             modelBuilder.Entity("ColdVerdge.Domain.Entities.PlayerEquipmentItem", b =>

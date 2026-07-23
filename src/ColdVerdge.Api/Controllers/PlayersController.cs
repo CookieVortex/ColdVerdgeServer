@@ -110,6 +110,7 @@ public sealed class PlayersController : ControllerBase
             UserName = player.UserName,
             Gold = player.Wallet.Gold,
             Copper = player.Wallet.Copper,
+            Progress = ProgressController.MapProgress(player),
             CreatedAtUtc = player.CreatedAtUtc
         };
     }

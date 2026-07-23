@@ -4,6 +4,7 @@ using ColdVerdge.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
@@ -11,9 +12,10 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ColdVerdge.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(GameDbContext))]
-    partial class GameDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260719194000_AddServerAuthoritativeInventory")]
+    partial class AddServerAuthoritativeInventory
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -69,6 +71,7 @@ namespace ColdVerdge.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_inventory_grants_quantity_positive", "quantity > 0");
                         });
                 });
+
 
             modelBuilder.Entity("ColdVerdge.Domain.Entities.InventoryMutation", b =>
                 {
@@ -128,66 +131,6 @@ namespace ColdVerdge.Infrastructure.Persistence.Migrations
                         });
                 });
 
-            modelBuilder.Entity("ColdVerdge.Domain.Entities.MarketOffer", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<Guid?>("BuyerPlayerId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("buyer_player_id");
-
-                    b.Property<string>("CreateRequestId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("create_request_id");
-
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<string>("ItemId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("item_id");
-
-                    b.Property<int>("PriceCopper")
-                        .HasColumnType("integer")
-                        .HasColumnName("price_copper");
-
-                    b.Property<Guid>("SellerPlayerId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("seller_player_id");
-
-                    b.Property<DateTimeOffset?>("SoldAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("sold_at_utc");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("status");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SellerPlayerId", "CreateRequestId")
-                        .IsUnique();
-
-                    b.HasIndex("ItemId", "Status", "PriceCopper", "CreatedAtUtc");
-
-                    b.ToTable("market_offers", null, t =>
-                        {
-                            t.HasCheckConstraint("ck_market_offers_price_positive", "price_copper > 0");
-
-                            t.HasCheckConstraint("ck_market_offers_status_supported", "status IN ('active', 'sold', 'cancelled')");
-                        });
-                });
-
             modelBuilder.Entity("ColdVerdge.Domain.Entities.Player", b =>
                 {
                     b.Property<Guid>("Id")
@@ -195,137 +138,15 @@ namespace ColdVerdge.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<int>("Agility")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(10)
-                        .HasColumnName("agility");
-
-                    b.Property<int>("AssaultRiflesExperience")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0)
-                        .HasColumnName("assault_rifles_experience");
-
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
-
-                    b.Property<int>("CurrentExperience")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0)
-                        .HasColumnName("current_experience");
-
-                    b.Property<int>("Endurance")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(10)
-                        .HasColumnName("endurance");
-
-                    b.Property<int>("ExperienceToNextLevel")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(100)
-                        .HasColumnName("experience_to_next_level");
-
-                    b.Property<int>("FreeAttributePoints")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(5)
-                        .HasColumnName("free_attribute_points");
-
-                    b.Property<int>("Intelligence")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(10)
-                        .HasColumnName("intelligence");
-
-                    b.Property<int>("Level")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(1)
-                        .HasColumnName("level");
-
-                    b.Property<int>("MachineGunsExperience")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0)
-                        .HasColumnName("machine_guns_experience");
-
-                    b.Property<int>("MedicineExperience")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0)
-                        .HasColumnName("medicine_experience");
 
                     b.Property<string>("NormalizedUserName")
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)")
                         .HasColumnName("normalized_user_name");
-
-                    b.Property<int>("Perception")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(10)
-                        .HasColumnName("perception");
-
-                    b.Property<int>("PistolsExperience")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0)
-                        .HasColumnName("pistols_experience");
-
-                    b.Property<string>("ProfessionId")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasDefaultValue("")
-                        .HasColumnName("profession_id");
-
-                    b.Property<DateTimeOffset>("ProgressUpdatedAtUtc")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("progress_updated_at_utc")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<int>("ShotgunsExperience")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0)
-                        .HasColumnName("shotguns_experience");
-
-                    b.Property<int>("SniperRiflesExperience")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0)
-                        .HasColumnName("sniper_rifles_experience");
-
-                    b.Property<int>("Strength")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(10)
-                        .HasColumnName("strength");
-
-                    b.Property<int>("SubmachineGunsExperience")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0)
-                        .HasColumnName("submachine_guns_experience");
-
-                    b.Property<int>("Survival")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(10)
-                        .HasColumnName("survival");
-
-                    b.Property<int>("ThrowablesExperience")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0)
-                        .HasColumnName("throwables_experience");
 
                     b.Property<string>("UserName")
                         .IsRequired()
@@ -338,23 +159,9 @@ namespace ColdVerdge.Infrastructure.Persistence.Migrations
                     b.HasIndex("NormalizedUserName")
                         .IsUnique();
 
-                    b.ToTable("players", null, t =>
-                        {
-                            t.HasCheckConstraint("ck_players_attributes_non_negative", "strength >= 0 AND endurance >= 0 AND agility >= 0 AND perception >= 0 AND intelligence >= 0 AND survival >= 0");
-
-                            t.HasCheckConstraint("ck_players_current_experience_non_negative", "current_experience >= 0");
-
-                            t.HasCheckConstraint("ck_players_experience_to_next_level_positive", "experience_to_next_level >= 1");
-
-                            t.HasCheckConstraint("ck_players_free_attribute_points_non_negative", "free_attribute_points >= 0");
-
-                            t.HasCheckConstraint("ck_players_level_positive", "level >= 1");
-
-                            t.HasCheckConstraint("ck_players_profession_supported", "profession_id IN ('', 'miner', 'mercenary', 'engineer', 'scout', 'mayor')");
-
-                            t.HasCheckConstraint("ck_players_skill_experience_range", "pistols_experience BETWEEN 0 AND 15000 AND submachine_guns_experience BETWEEN 0 AND 15000 AND assault_rifles_experience BETWEEN 0 AND 15000 AND shotguns_experience BETWEEN 0 AND 15000 AND sniper_rifles_experience BETWEEN 0 AND 15000 AND machine_guns_experience BETWEEN 0 AND 15000 AND throwables_experience BETWEEN 0 AND 15000 AND medicine_experience BETWEEN 0 AND 15000");
-                        });
+                    b.ToTable("players", (string)null);
                 });
+
 
             modelBuilder.Entity("ColdVerdge.Domain.Entities.PlayerEquipmentItem", b =>
                 {
@@ -363,6 +170,7 @@ namespace ColdVerdge.Infrastructure.Persistence.Migrations
                         .HasColumnName("player_id");
 
                     b.Property<string>("Slot")
+                        .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)")
                         .HasColumnName("slot");
@@ -453,47 +261,6 @@ namespace ColdVerdge.Infrastructure.Persistence.Migrations
                         });
                 });
 
-            modelBuilder.Entity("ColdVerdge.Domain.Entities.ProgressMutation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<string>("Operation")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("operation");
-
-                    b.Property<string>("Payload")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)")
-                        .HasColumnName("payload");
-
-                    b.Property<Guid>("PlayerId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("player_id");
-
-                    b.Property<string>("RequestId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("request_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PlayerId", "RequestId")
-                        .IsUnique();
-
-                    b.ToTable("progress_mutations", (string)null);
-                });
-
             modelBuilder.Entity("ColdVerdge.Domain.Entities.WalletTransaction", b =>
                 {
                     b.Property<Guid>("Id")
@@ -554,6 +321,7 @@ namespace ColdVerdge.Infrastructure.Persistence.Migrations
                     b.Navigation("Player");
                 });
 
+
             modelBuilder.Entity("ColdVerdge.Domain.Entities.InventoryMutation", b =>
                 {
                     b.HasOne("ColdVerdge.Domain.Entities.Player", "Player")
@@ -565,16 +333,6 @@ namespace ColdVerdge.Infrastructure.Persistence.Migrations
                     b.Navigation("Player");
                 });
 
-            modelBuilder.Entity("ColdVerdge.Domain.Entities.MarketOffer", b =>
-                {
-                    b.HasOne("ColdVerdge.Domain.Entities.Player", "SellerPlayer")
-                        .WithMany()
-                        .HasForeignKey("SellerPlayerId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("SellerPlayer");
-                });
 
             modelBuilder.Entity("ColdVerdge.Domain.Entities.PlayerEquipmentItem", b =>
                 {
@@ -603,17 +361,6 @@ namespace ColdVerdge.Infrastructure.Persistence.Migrations
                     b.HasOne("ColdVerdge.Domain.Entities.Player", "Player")
                         .WithOne("Wallet")
                         .HasForeignKey("ColdVerdge.Domain.Entities.PlayerWallet", "PlayerId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Player");
-                });
-
-            modelBuilder.Entity("ColdVerdge.Domain.Entities.ProgressMutation", b =>
-                {
-                    b.HasOne("ColdVerdge.Domain.Entities.Player", "Player")
-                        .WithMany()
-                        .HasForeignKey("PlayerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
